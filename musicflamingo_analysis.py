@@ -24,6 +24,25 @@ _processor = None
 _models = {}
 
 
+def _get_model_cache_dir() -> str:
+    """
+    Returns a path under the ComfyUI installation where the Music Flamingo
+    models will be stored, ensuring the directory exists.
+
+    The resulting path is:
+        <comfyui_root>/models/checkpoints/musicflamingo
+    where <comfyui_root> is the ComfyUI install directory that contains
+    both `custom_nodes` and `models`.
+    """
+    # This file lives at:
+    #   <comfyui_root>/custom_nodes/comfyui-musicflamingo/musicflamingo_analysis.py
+    # so we go two levels up to reach <comfyui_root>.
+    comfy_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+    cache_dir = os.path.join(comfy_root, "models", "checkpoints", "musicflamingo")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
 class _ComfyInterruptStoppingCriteria(StoppingCriteria):
     """
     HuggingFace `StoppingCriteria` that:
@@ -77,10 +96,13 @@ def _get_music_flamingo(device: str) -> Tuple[AutoProcessor, AudioFlamingo3ForCo
         device = "gpu"
 
     if _processor is None:
+        cache_dir = _get_model_cache_dir()
         _processor = AutoProcessor.from_pretrained(MODEL_ID)
 
     if device not in _models:
         # Prefer bfloat16 on supported GPUs, otherwise fall back to fp16.
+        cache_dir = _get_model_cache_dir()
+
         if device == "gpu" and torch.cuda.is_available():
             if torch.cuda.is_bf16_supported():
                 preferred_dtype = torch.bfloat16
@@ -90,6 +112,7 @@ def _get_music_flamingo(device: str) -> Tuple[AutoProcessor, AudioFlamingo3ForCo
             try:
                 _models["gpu"] = AudioFlamingo3ForConditionalGeneration.from_pretrained(
                     MODEL_ID,
+                    cache_dir=cache_dir,
                     device_map="auto",
                     torch_dtype=preferred_dtype,
                 )
@@ -97,6 +120,7 @@ def _get_music_flamingo(device: str) -> Tuple[AutoProcessor, AudioFlamingo3ForCo
                 # If the chosen dtype is not supported on this device, fall back to fp32.
                 _models["gpu"] = AudioFlamingo3ForConditionalGeneration.from_pretrained(
                     MODEL_ID,
+                    cache_dir=cache_dir,
                     device_map="auto",
                     torch_dtype=torch.float32,
                 )
@@ -104,6 +128,7 @@ def _get_music_flamingo(device: str) -> Tuple[AutoProcessor, AudioFlamingo3ForCo
             # Force a pure-CPU load regardless of whether a GPU is available.
             _models["cpu"] = AudioFlamingo3ForConditionalGeneration.from_pretrained(
                 MODEL_ID,
+                cache_dir=cache_dir,
                 device_map={"": "cpu"},
                 torch_dtype=torch.float32,
             )
